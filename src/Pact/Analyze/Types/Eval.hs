@@ -147,7 +147,7 @@ data TxMetadata
     { _tmKeySets  :: SFunArray Str Guard
     , _tmDecimals :: SFunArray Str Decimal
     , _tmIntegers :: SFunArray Str Integer
-    -- TODO: strings
+    , _tmStrings  :: SFunArray Str Str
     }
   deriving Show
 
@@ -187,6 +187,7 @@ mkAnalyzeEnv modName pactMetadata registry tables caps args stepChoices tags inf
   let txMetadata   = TxMetadata (mkFreeArray "txKeySets")
                                 (mkFreeArray "txDecimals")
                                 (mkFreeArray "txIntegers")
+                                (mkFreeArray "txStrings")
       --
       -- NOTE: for now we create an always-passing singleton "trivial guard"
       -- that we hand out for pact and module creation. this will not suffice
@@ -474,6 +475,9 @@ class HasAnalyzeEnv a where
   txIntegers :: Lens' a (SFunArray Str Integer)
   txIntegers = analyzeEnv.aeTxMetadata.tmIntegers
 
+  txStrings :: Lens' a (SFunArray Str Str)
+  txStrings = analyzeEnv.aeTxMetadata.tmStrings
+
   inPact :: Lens' a (S Bool)
   inPact = analyzeEnv.aePactMetadata.pmInPact
 
@@ -700,6 +704,14 @@ readDecimal
   -> m (S Decimal)
 readDecimal sStr = fmap (withProv $ fromMetadata sStr) $
   readArray <$> view txDecimals <*> pure (_sSbv sStr)
+
+-- | Reads a named string from tx metadata
+readString
+  :: (MonadReader r m, HasAnalyzeEnv r)
+  => S Str
+  -> m (S Str)
+readString sStr = fmap (withProv $ fromMetadata sStr) $
+  readArray <$> view txStrings <*> pure (_sSbv sStr)
 
 -- | Reads a named integer from tx metadata
 readInteger

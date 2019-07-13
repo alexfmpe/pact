@@ -313,6 +313,7 @@ data GlobalAnalyzeState
     , _gasNextUninterpId   :: Integer
     , _gasRollbacks        :: [ETerm]
     -- ^ the stack of rollbacks to perform on failure
+    , _gasCachedChainData  :: Maybe EVal
     }
   deriving (Show)
 
@@ -395,6 +396,7 @@ mkInitialAnalyzeState tables caps = AnalyzeState
         { _gasGuardProvenances = mempty
         , _gasNextUninterpId   = 0
         , _gasRollbacks        = []
+        , _gasCachedChainData  = Nothing
         }
     }
 

@@ -70,6 +70,23 @@ serveAndRequest port body = do
     (runClientM (verifyClient body) clientEnv)
     (killThread tid)
 
+mkNamespaces :: Text
+mkNamespaces = [text|
+  (module ns MODULE_ADMIN
+    (defcap MODULE_ADMIN () true)
+
+    (defun success ()
+      true)
+    (defun failure ()
+      (enforce false "Disabled"))
+
+    (defconst GUARD_SUCCESS (create-user-guard (success)))
+    (defconst GUARD_FAILURE (create-user-guard (failure))))
+
+  (define-namespace 'ns1 GUARD_SUCCESS GUARD_FAILURE)
+  (define-namespace 'ns2 GUARD_SUCCESS GUARD_FAILURE)
+|]
+
 testSingleModule :: Spec
 testSingleModule = do
   replState0 <- runIO $ either (error.show) id <$> loadCode
@@ -79,6 +96,8 @@ testSingleModule = do
       (begin-tx)
 
       (define-keyset 'ks (read-keyset "keyset"))
+      $mkNamespaces
+      (namespace 'ns1)
       (module mod1 'ks
         (defun f:integer ()
           @doc   "always returns 1"
@@ -88,12 +107,13 @@ testSingleModule = do
       (commit-tx)
     |]
 
+  let mn1 = "ns1.mod1"
   it "loads locally" $ do
-    stateModuleData "mod1" replState0 >>= (`shouldSatisfy` isRight)
+    stateModuleData mn1 replState0 >>= (`shouldSatisfy` isRight)
 
-  (ModuleData mod1 _refs) <- runIO $ either error id <$> stateModuleData "mod1" replState0
+  (ModuleData mod1 _refs) <- runIO $ either error id <$> stateModuleData mn1 replState0
 
-  resp <- runIO $ serveAndRequest 3000 $ Remote.Request [derefDef <$> mod1] "mod1"
+  resp <- runIO $ serveAndRequest 3000 $ Remote.Request [derefDef <$> mod1] mn1
 
   it "verifies over the network" $
     fmap (view Remote.responseLines) resp `shouldBe`
@@ -103,14 +123,17 @@ testUnsortedModules :: Spec
 testUnsortedModules = do
   replState0 <- runIO $ either (error . show) id <$> loadCode code
 
+  let mn1 = "ns1.mod1"
+      mn2 = "ns2.mod2"
+
   it "loads when topologically sorted locally" $ do
     stateModuleData "mod2" replState0 >>= (`shouldSatisfy` isRight)
 
   resp <- runIO . runExceptT $ do
-    ModuleData mod1 _refs <- ExceptT $ stateModuleData "mod1" replState0
-    ModuleData mod2 _refs <- ExceptT $ stateModuleData "mod2" replState0
+    ModuleData mod1 _refs <- ExceptT $ stateModuleData mn1 replState0
+    ModuleData mod2 _refs <- ExceptT $ stateModuleData mn2 replState0
     ExceptT . fmap (first show) . serveAndRequest 3001 $
-      Remote.Request [derefDef <$> mod2, derefDef <$> mod1] "mod2"
+      Remote.Request [derefDef <$> mod2, derefDef <$> mod1] mn2
 
   it "verifies over the network" $
     fmap (view Remote.responseLines) resp `shouldBe`
@@ -121,6 +144,8 @@ testUnsortedModules = do
       (env-data { "keyset": { "keys": ["admin"], "pred": "=" } })
       (begin-tx)
       (define-keyset 'ks (read-keyset "keyset"))
+      $mkNamespaces
+      (namespace 'ns1)
       (module mod1 'ks
         (defun f:integer ()
           @doc   "always returns 1"
@@ -129,8 +154,9 @@ testUnsortedModules = do
       (commit-tx)
       (begin-tx)
       (define-keyset 'ks2 (read-keyset "keyset"))
+      (namespace 'ns2)
       (module mod2 'ks2
-        (use mod1)
+        (use ns1.mod1)
         (defun g:integer ()
           @doc   "always returns 2"
           @model [(property (= result 2))]
